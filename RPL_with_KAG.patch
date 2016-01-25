@@ -1,0 +1,318 @@
+diff -r rpl_originale/rpl.c rpl/rpl.c
+317a318,407
+> #ifdef KEEP_ALIVE_GUARD
+> // inizialeze the nwlr_table table
+> void
+> nwlr_table_init()
+> {
+>   memset(nwlr_table, 0, sizeof(struct kag_nwlr_element) * RPL_KAG_MAX_NEIGHBOUR_WITH_LOWER_RANCK);
+>   kag_data.next_free_index=0;
+> }
+> /*---------------------------------------------------------------------------*/
+> /*
+>  * Add a new element to the nwlr_table if possible and starts the timer of this
+>  * new element, function last_chance() will be called when the timer expire.
+>  *
+>  * @paramenter new_ip, the ip of the new element in the table.
+>  *			   time, time after the timer will expire, in CPU ticks.
+>  * 
+>  * @return 1 if the element was added, 0 otherwise.
+>  */
+> int
+> nwlr_table_add(uip_ipaddr_t* new_ip, clock_time_t time)
+> {
+>   if (kag_data.next_free_index < RPL_KAG_MAX_NEIGHBOUR_WITH_LOWER_RANCK) {
+>     memcpy(&nwlr_table[kag_data.next_free_index].ip, new_ip, sizeof (uip_ipaddr_t));
+>     ctimer_set(&nwlr_table[kag_data.next_free_index].keep_alive_timer, time, last_chance, &nwlr_table[kag_data.next_free_index]);
+>     ++kag_data.next_free_index;
+>     return 1; // element added
+>   }
+>   return 0; // table is full !
+> }
+> /*---------------------------------------------------------------------------*/
+> /*
+>  * Search an element in the nwlr_table using the ip passed as parameter.
+>  * If the element exist retrun a pointer to the element, otherwise NULL
+>  * is returned.
+>  *
+>  * @paramenter ip, the ip we are looking for.
+>  * 
+>  * @return a pointer to the searched element, or NULL if the element
+>  *		   is not in the table.
+>  */
+> struct kag_nwlr_element *
+> nwlr_table_find(uip_ipaddr_t* ip)
+> {
+>   unsigned int i;
+>   for (i=0; i<kag_data.next_free_index; ++i)
+>     if (uip_ipaddr_cmp(ip, &nwlr_table[i].ip))
+>       return &nwlr_table[i];
+>   return NULL;
+> }
+> /*---------------------------------------------------------------------------*/
+> /*
+>  * This function is called when the timer of an element in the nwlr_table
+>  * expires. This function send a DIS message to the node whose timer is expired
+>  * and reset the timer to call the function set by the user.
+>  *
+>  * @paramenter expired_elem, the element in the table whose timer is expired.
+>  */
+> void
+> last_chance(void* expired_elem)
+> {
+>   struct kag_nwlr_element* expired_element= (struct kag_nwlr_element*) expired_elem;
+>   dis_output(&expired_element->ip);
+>   ctimer_set(&expired_element->keep_alive_timer, kag_data.next_dio_msg, kag_data.found_dead_node, &expired_element->ip);
+> }
+> /*---------------------------------------------------------------------------*/
+> /*
+>  * This function hould be called before start_kag().
+>  * Set the function to be called if a node becomes unreachable.
+>  *
+>  * @paramenter call_back, the function to be called if a node becomes
+>  *			   unreachable.
+>  */
+> void
+> set_handler_function(void (*call_back)(void *))
+> {
+>   kag_data.found_dead_node=call_back;
+> }
+> /*---------------------------------------------------------------------------*/
+> /*
+>  * Stop all timer in the nwlr_table when the KAG is disable.
+>  */
+> void
+> nwlr_table_stop_timers()
+> {
+>   int i;
+>   for (i=0; i<kag_data.next_free_index;i++) {
+> 	ctimer_stop(&nwlr_table[i].keep_alive_timer);
+>   }
+> }
+> #endif /* KEEP_ALIVE_GUARD */
+diff -r rpl_originale/rpl-conf.h rpl/rpl-conf.h
+286a287,292
+> #ifdef KEEP_ALIVE_GUARD
+> #define RPL_KAG_MAX_NEIGHBOUR_WITH_LOWER_RANCK 10   /* number NWLR entries */
+> #define RPL_KAG_INTMIN 11	/* interval for DIO messages when KAG is active */
+> #define RPL_KAG_REDUNDANCY RPL_KAG_MAX_NEIGHBOUR_WITH_LOWER_RANCK*10 /* redundancy parameter for trickle when KAG is active. We supppose that the only 1/10 of out neighbours have rank greater than our */
+> #endif /* KEEP_ALIVE_GUARD */
+> 
+diff -r rpl_originale/rpl-dag.c rpl/rpl-dag.c
+58a59,61
+> #ifdef KEEP_ALIVE_GUARD
+> #include <stdlib.h> // to use rand()
+> #endif /*KEEP_ALIVE_GUARD */
+83a87,93
+> #ifdef KEEP_ALIVE_GUARD
+> struct kag_global_data kag_data={NULL,0,0,0,0};
+> struct kag_nwlr_element nwlr_table[RPL_KAG_MAX_NEIGHBOUR_WITH_LOWER_RANCK];
+> struct ctimer timer_random;
+> extern void call_new_dio_interval(rpl_instance_t *instance);
+> #endif /* KEEP_ALIVE_GUARD */
+> 
+1416a1427,1484
+> #ifdef KEEP_ALIVE_GUARD
+> /*
+>  * Initialize the nwlr_table, save the current trickle parameter an set
+>  * the trickle parameter for the KAG.
+>  */
+> void
+> start_kag()
+> {
+>   rpl_instance_t *instance;
+>   instance = rpl_get_default_instance();
+>   kag_data.alarm_activated=1;
+>   nwlr_table_init();
+>   
+>   ctimer_stop(&instance->dio_timer);
+>   
+>   kag_data.redundancy=instance->dio_redundancy;
+>   kag_data.intdouble=instance->dio_intdoubl;
+>   kag_data.intmin=instance->dio_intmin;
+>   
+>   instance->dio_intdoubl=0;
+>   instance->dio_redundancy=RPL_KAG_REDUNDANCY;
+>   instance->dio_intmin=RPL_KAG_INTMIN;
+>   instance->dio_counter=0;
+>   instance->dio_intcurrent=instance->dio_intmin + instance->dio_intdoubl;
+>   
+>   call_new_dio_interval(instance);
+> }
+> /*---------------------------------------------------------------------------*/
+> void avoids_collisions(void* instance)
+> {
+>   dio_output((rpl_instance_t *) instance, NULL); /* multicast DIO */
+> }
+> /*---------------------------------------------------------------------------*/
+> /*
+>  * Disable the KAG and restore the old value of the trickle parameters.
+>  * doi_intcurrent is set equal to dio_intmin so the trickle is resetted.
+>  */
+> void stop_kag()
+> {
+>   rpl_instance_t *instance;
+>   instance = rpl_get_default_instance();
+>   kag_data.alarm_activated=0;
+>   nwlr_table_stop_timers();
+>   
+>   ctimer_stop(&instance->dio_timer);
+>   
+>   instance->dio_redundancy = kag_data.redundancy;
+>   instance->dio_intdoubl = kag_data.intdouble;
+>   instance->dio_intmin =kag_data.intmin;
+>   instance->dio_counter=0;
+>   instance->dio_intcurrent=instance->dio_intmin;
+>   
+>   ctimer_set(&timer_random, ((uint32_t)rand())%((1UL << RPL_KAG_INTMIN)*CLOCK_SECOND/1000/4), &avoids_collisions, instance);
+>   call_new_dio_interval(instance);
+> }
+> /*---------------------------------------------------------------------------*/
+> #endif /* KEEP_ALIVE_GUARD */
+> 
+diff -r rpl_originale/rpl-dag-root.h rpl/rpl-dag-root.h
+40a41,45
+> #ifdef KEEP_ALIVE_GUARD
+> void start_kag();
+> void stop_kag();
+> #endif /* KEEP_ALIVE_GUARD */
+> 
+diff -r rpl_originale/rpl.h rpl/rpl.h
+235a236,258
+> #ifdef KEEP_ALIVE_GUARD
+> // for each node we must record the IP and set a timer
+> struct kag_nwlr_element {
+>     uip_ipaddr_t ip;
+>     struct ctimer keep_alive_timer;
+> };
+> // global data for the KAG
+> struct kag_global_data
+> {
+>     void (*found_dead_node)(void*); // function to be called if integrity fail
+>     uint8_t alarm_activated; // 1, if alarm is active, 0 otherwise
+>     uint8_t redundancy, intdouble, intmin; /* trickle parameter to be saved
+>     					when the KAG starts and restored when the KAG stops */
+>     clock_time_t next_dio_msg; // interval for DIO messages when KAG is active
+>     unsigned int next_free_index; /* index of the first valid entry in the
+>     								 nwlr_table */
+> };
+> extern struct kag_nwlr_element nwlr_table[];
+> extern struct kag_global_data kag_data;
+> extern void start_kag();
+> extern void stop_kag();
+> #endif /* KEEP_ALIVE_GUARD */
+> 
+294a318,326
+> #ifdef KEEP_ALIVE_GUARD
+> void nwlr_table_init();
+> int nwlr_table_add(uip_ipaddr_t* new_ip, clock_time_t t);
+> struct kag_nwlr_element* nwlr_table_find(uip_ipaddr_t* ip);
+> void last_chance(void* expired_element);
+> void nwlr_table_stop_timers();
+> void set_handler_function(void (*call_back)(void *));
+> #endif /* KEEP_ALIVE_GUARD */
+> 
+diff -r rpl_originale/rpl-icmp6.c rpl/rpl-icmp6.c
+63a64,68
+> 
+> /*---------------------------------------------------------------------------*/
+> #ifdef KEEP_ALIVE_GUARD
+> extern void call_new_dio_interval(rpl_instance_t *instance);
+> #endif /* KEEP_ALIVE_GUARD */
+173a179,183
+> #ifdef KEEP_ALIVE_GUARD
+>         ctimer_stop(&instance->dio_timer);
+>         call_new_dio_interval(instance);
+>         dio_output(instance, NULL); /* send always multicast DIO */
+> #else
+174a185
+> #endif /* KEEP_ALIVE_GUARD */
+221a233,241
+> #ifdef KEEP_ALIVE_GUARD
+>   rpl_dag_t *dag;
+>   rpl_instance_t *instance;
+>   uint8_t new_alarm_status=0; // alarm flag read from the received DIO
+>   clock_time_t remaining_clock; /* cloks remaining to the end of the current
+>   									DIO interval */
+>   uip_ipaddr_t guardian_node_adress;
+>   struct kag_nwlr_element *neighbor_dio;
+> #endif /* KEEP_ALIVE_GUARD */
+372a393,395
+> #ifdef KEEP_ALIVE_GUARD
+>       if(len != 17) { // last byte is the alarm flag
+> #else
+373a397
+> #endif /* KEEP_ALIVE_GUARD */
+388a413,415
+> #ifdef KEEP_ALIVE_GUARD
+>       new_alarm_status = buffer[i + 16]; // read if we must enable/disable KAG
+> #endif /* KEEP_ALIVE_GUARD */
+418a446,483
+> #ifdef KEEP_ALIVE_GUARD
+>   instance=rpl_get_instance(dio.instance_id);
+>   dag=instance->current_dag;
+>   
+>   uip_ip6addr(&guardian_node_adress, 0xfe80, 0, 0, 0, 0xc30c, 0, 0, 2);
+>   if (new_alarm_status) { // if alarm is active
+>     // if in this node KAG is disable we must activate it
+>     if (!kag_data.alarm_activated && (DAG_RANK(dio.rank,instance) <= DAG_RANK(dag->rank,instance) || !memcmp(&from,&guardian_node_adress,sizeof(uip_ipaddr_t)))) {
+>       nwlr_table_init();
+>       kag_data.alarm_activated=1;
+>       instance->dio_intdoubl = dio.dag_intdoubl;
+>       instance->dio_intmin = dio.dag_intmin;
+>       instance->dio_redundancy = dio.dag_redund;
+>       instance->dio_intcurrent = instance->dio_intmin + instance->dio_intdoubl;
+>       ctimer_stop(&instance->dio_timer);
+>       call_new_dio_interval(instance);
+>     }
+>     
+>     // if the DIO comes from a node that we must monitor, reset its timer
+>     if (DAG_RANK(dio.rank,instance) > DAG_RANK(dag->rank,instance)) {
+>       neighbor_dio=nwlr_table_find(&from);
+>       if (!neighbor_dio) {
+>         if (nwlr_table_add(&from, kag_data.next_dio_msg)==0)
+>           PRINTF("ERROR! Keep alive guard table full! \n");
+>       }
+>       else {
+>         remaining_clock=timer_remaining(&neighbor_dio->keep_alive_timer.etimer.timer);
+>         ctimer_stop(&neighbor_dio->keep_alive_timer);
+>         ctimer_set(&neighbor_dio->keep_alive_timer,kag_data.next_dio_msg + remaining_clock,last_chance, neighbor_dio);
+>       }
+>     }
+>   }
+>   else // if the DIO message have the alarm flag turned off, stop the KAG
+>     if (kag_data.alarm_activated) {
+>       stop_kag();
+>     }
+> #endif /* KEEP_ALIVE_GUARD */
+> 
+510a576,579
+> #ifdef KEEP_ALIVE_GUARD
+>     buffer[pos++] = 15; /* the length of the option with the KAG is
+>     						one byte bigger */
+> #else
+511a581
+> #endif /* KEEP_ALIVE_GUARD */
+526a597,600
+> #ifdef KEEP_ALIVE_GUARD
+>   PRINTF("dio_out %d\n",kag_data.alarm_activated);
+>   buffer[pos++]=kag_data.alarm_activated; // send our KAG status
+> #endif /* KEEP_ALIVE_GUARD */
+diff -r rpl_originale/rpl-timers.c rpl/rpl-timers.c
+95a96,99
+> #ifdef KEEP_ALIVE_GUARD
+>   kag_data.next_dio_msg=ticks;
+> #endif /* KEEP_ALIVE_GUARD */
+> 
+422a427,437
+> /*---------------------------------------------------------------------------*/
+> #ifdef KEEP_ALIVE_GUARD
+> /*
+>  * Schedule a new DIO message to be sent
+>  */
+> void
+> call_new_dio_interval(rpl_instance_t *instance)
+> {
+>   new_dio_interval(instance);
+> }
+> #endif /*KEEP_ALIVE_GUARD */

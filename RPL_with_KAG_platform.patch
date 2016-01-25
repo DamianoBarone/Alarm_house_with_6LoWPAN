@@ -1,0 +1,7 @@
+156a157,160
+> 
+> #ifdef KEEP_ALIVE_GUARD
+> #define UIP_CONF_BUFFER_SIZE		240
+> #else
+157a162
+> #endif /* KEEP_ALIVE_GUARD */
