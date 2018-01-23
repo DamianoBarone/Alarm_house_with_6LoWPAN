@@ -1,8 +1,0 @@
-1. Create on eclipse “dynamic web project”
-2. Import Servlet
-3. If you have problem to compile import file in folder jar (right click on the project -> build path ->deployment assembly ->add)
-4.Copy folder rpl in contiki/core/net or use the patch (the rpl_with_kag.patch in folder rpl, the second patch in file /contiki/platform/z1/contiki-conf.h )
-5. open cooja and create a network, the fist node must be  Border router and the second the guardian, create 4 generic node.
-6.start the simulation 
-7. start server
-8. connect to the servlet (http://localhost:8080/alarm_house/Servlet)
